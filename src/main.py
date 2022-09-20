@@ -14,6 +14,8 @@ def get_root_chart() -> str:
 
 
 def find_dependencies(graph: Dict, root_chart: str):
+    dep_result_dict: Dict = {}
+
     def _f(chart):
         dep_list: List = graph[chart]
         if len(dep_list) == 0:
@@ -42,17 +44,20 @@ def find_dependencies(graph: Dict, root_chart: str):
         # and values.yaml. For example,
         # "root new deps ['b', 'd', 'a'], parent_look_up={'f': ['a'], 'd': ['a', 'b'], 'c': ['a']}" indicates
         # root Chart.yaml dependencies
-        # should have deps [a,b,d], root's values.yaml a.d.enabled: False and b.d.enabled: False
+        # should have deps [a,b,d], root's values.yaml a.d.enabled: False and b.d.enabled: False,
         # d.enabled: True
         if new_deps_added:
-            print(f"{chart} new deps {new_dep_list}, parent_look_up={child_dep_dict}")
+            dep_result_dict[chart] = {"full_deps": new_dep_list, "parent_look_up": child_dep_dict}
         return new_dep_list
 
-    root_dep_list = _f(root_chart)
-    return root_dep_list
+    _ = _f(root_chart)
+    return dep_result_dict
 
 
 if __name__ == "__main__":
+    import pprint
+
     graph = construct_graph([])
     root = get_root_chart()
-    root_dep_list = find_dependencies(graph, root)
+    dep_result_dict = find_dependencies(graph, root)
+    pprint.pprint(dep_result_dict)
