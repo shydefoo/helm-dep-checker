@@ -1,11 +1,10 @@
-from typing import Dict, List, Set
+from pathlib import Path
+from typing import Dict, List
+
+from chart import Chart
 
 
-def chart_finder():
-    pass
-
-
-def construct_graph(input_charts: List) -> Dict:
+def construct_graph(input_charts: List[Chart]) -> Dict:
     return {"root": ["a", "b", "d"], "a": ["c", "d"], "b": ["d"], "c": ["e", "f"], "d": ["f"], "e": [], "f": []}
 
 
@@ -45,7 +44,7 @@ def find_dependencies(graph: Dict, root_chart: str):
         # "root new deps ['b', 'd', 'a'], parent_look_up={'f': ['a'], 'd': ['a', 'b'], 'c': ['a']}" indicates
         # root Chart.yaml dependencies
         # should have deps [a,b,d], root's values.yaml a.d.enabled: False and b.d.enabled: False,
-        # d.enabled: True
+        # d.enabled: True (assuming dependency condition is d.enabled)
         if new_deps_added:
             dep_result_dict[chart] = {"full_deps": new_dep_list, "parent_look_up": child_dep_dict}
         return new_dep_list
