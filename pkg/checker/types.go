@@ -1,41 +1,48 @@
 package checker
 
-import "helm.sh/helm/v3/pkg/chart"
+import (
+	"fmt"
+	"io"
+	"log"
+	"os"
 
-type JobValues struct {
-	Repository string `json:"repository"`
-	Chart      string `json:"chart"`
-	Version    string `json:"version"`
-	Namespace  string `json:"namespace"`
-	Release    string `json:"release"`
+	"helm.sh/helm/v3/pkg/action"
+	"helm.sh/helm/v3/pkg/chart"
+	"helm.sh/helm/v3/pkg/cli"
+	"helm.sh/helm/v3/pkg/downloader"
+	"helm.sh/helm/v3/pkg/getter"
+)
+
+var settings = cli.New()
+
+func debug(format string, v ...interface{}) {
+	if settings.Debug {
+		format = fmt.Sprintf("[debug] %s\n", format)
+		_ = log.Output(2, fmt.Sprintf(format, v...))
+	}
 }
 
-type CaramlChart interface {
-	GetChartHash() string
-	GetDepHash() string
-	Dependencies() []*chart.Chart
-}
+func setup(chartpath string, out io.Writer) (*downloader.Manager, error) {
 
-// JobChart is a special chart that will create helm releases using a k8s job
-type JobChart struct {
-	*chart.Chart
-	*JobValues
-}
+	actionConfig := new(action.Configuration)
+	helmDriver := os.Getenv("HELM_DRIVER")
+	if err := actionConfig.Init(settings.RESTClientGetter(), settings.Namespace(), helmDriver, debug); err != nil {
+		log.Fatal(err)
+	}
+	client := action.NewDependency()
+	man := &downloader.Manager{
+		Out:              out,
+		ChartPath:        chartpath,
+		Keyring:          client.Keyring,
+		SkipUpdate:       client.SkipRefresh,
+		Getters:          getter.All(settings),
+		RegistryClient:   actionConfig.RegistryClient,
+		RepositoryConfig: settings.RepositoryConfig,
+		RepositoryCache:  settings.RepositoryCache,
+		Debug:            settings.Debug,
+	}
+	return man, nil
 
-type DefaultChart struct {
-	*chart.Chart
-}
-
-func (d *DefaultChart) GetChartHash() string {
-	panic("not implemented") // TODO: Implement
-}
-
-func (d *DefaultChart) GetDepHash() string {
-	panic("not implemented") // TODO: Implement
-}
-
-func (d *DefaultChart) Dependencies() []*chart.Chart {
-	panic("not implemented") // TODO: Implement
 }
 
 // GetDependencyObj returns matching dependency chart from parent charts Metadata.Dependency
