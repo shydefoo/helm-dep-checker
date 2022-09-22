@@ -165,6 +165,7 @@ func WalkGraph(g *Graph, rootChart *chart.Chart) map[string]*Report {
 			chash := getChartHash(d)
 			if _, ok := depSet[chash]; !ok {
 				depSet[chash] = d
+				log.Printf("New Deps found: %s", chash)
 				newDepsFound = true
 			}
 		}

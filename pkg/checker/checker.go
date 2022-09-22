@@ -35,7 +35,7 @@ func (checker *Checker) CollectChanges(rMap map[string]*Report, g *Graph) (bool,
 	addedDeps := false
 	valuesFileChanged := false
 	for c, r := range rMap {
-		currChart := g.CMap[c]
+		root := g.CMap[c]
 		depAncestorMap := make(map[string][]*chart.Dependency)
 		modifiedValues := make(map[string]interface{})
 		newDepList := []*chart.Dependency{}
@@ -51,36 +51,37 @@ func (checker *Checker) CollectChanges(rMap map[string]*Report, g *Graph) (bool,
 			}
 
 			var d chart.Dependency
-			selectedParent := depAncestors[0]
+			selectedParent := depC.Parent()
 			// Search through list of dependencies to find dependency to add to Parent currChart
 			for _, i := range selectedParent.Metadata.Dependencies {
 				if getDepHashFromParent(depC, i) != getChartHash(depC) {
 					continue
 				}
 				d = *i
-				log.Printf("adding dep %s-%s to chart %s\n", d.Name, d.Version, currChart.Name())
+				nameToUse := nameOrAlias(&d)
+				log.Printf("Add dep %s-%s to chart %s\n", d.Name, d.Version, root.Name())
 				addedDeps = true
 				newDep := &chart.Dependency{
 					Name:       d.Name,
 					Version:    d.Version,
 					Repository: d.Repository,
-					Condition:  fmt.Sprintf("%s.%s", nameOrAlias(&d), "enabled"),
+					Condition:  fmt.Sprintf("%s.%s", nameToUse, "enabled"),
 					Alias:      d.Alias,
 					Enabled:    true,
 				}
-				currChart.Metadata.Dependencies = append(currChart.Metadata.Dependencies, newDep)
+				root.Metadata.Dependencies = append(root.Metadata.Dependencies, newDep)
 				newDepList = append(newDepList, newDep)
 				// Collect changes to instruct users to make changes to Values.yaml
-				found, _ := SetValues(currChart, true, d.Condition, modifiedValues)
+				found, _ := SetValues(root, true, d.Condition, modifiedValues)
 				if IsGenericInstaller(depC) {
-					helmChartV := depC.Parent().Values[nameOrAlias(&d)].(map[string]interface{})[HelmChartKey]
-					found, _ = SetValues(currChart, helmChartV, fmt.Sprintf("%s.%s", nameOrAlias(&d), HelmChartKey), modifiedValues)
+					helmChartV := depC.Parent().Values[nameToUse].(map[string]interface{})[HelmChartKey]
+					found, _ = SetValues(root, helmChartV, fmt.Sprintf("%s.%s", nameToUse, HelmChartKey), modifiedValues)
 				}
 				valuesFileChanged = valuesFileChanged || found
 			}
 			// Search for existing dependencies to disable grandchild dependencies
-			for _, currChartDep := range currChart.Metadata.Dependencies {
-				pdeps, ok := depAncestorMap[getDepHashFromParent(currChart, currChartDep)]
+			for _, rootChartDep := range root.Metadata.Dependencies {
+				pdeps, ok := depAncestorMap[getDepHashFromParent(root, rootChartDep)]
 				if !ok {
 					continue
 				}
@@ -88,9 +89,8 @@ func (checker *Checker) CollectChanges(rMap map[string]*Report, g *Graph) (bool,
 				for _, pdep := range pdeps {
 					if getDepHashFromParent(depC, pdep) == getChartHash(depC) {
 						pdepCond = pdep.Condition
-						// This will modify values.yaml and lose any comments
-						nameToUse := nameOrAlias(currChartDep)
-						found, _ := SetValues(currChart, false, fmt.Sprintf("%s.%s", nameToUse, pdepCond), modifiedValues)
+						nameToUse := nameOrAlias(rootChartDep)
+						found, _ := SetValues(root, false, fmt.Sprintf("%s.%s", nameToUse, pdepCond), modifiedValues)
 						valuesFileChanged = valuesFileChanged || found
 					}
 				}
@@ -103,17 +103,17 @@ func (checker *Checker) CollectChanges(rMap map[string]*Report, g *Graph) (bool,
 			if err != nil {
 				return changed, "", err
 			}
-			changesToAdd += fmt.Sprintf("Dependencies to add to %s/Chart.yaml: \n%s\n", currChart.Name(), string(b))
+			changesToAdd += fmt.Sprintf("Dependencies to add to %s/Chart.yaml: \n%s\n", root.Name(), string(b))
 		}
 		if valuesFileChanged {
 			b, err := yaml.Marshal(modifiedValues)
 			if err != nil {
 				return changed, "", err
 			}
-			changesToAdd += fmt.Sprintf("Modify to %s/values.yaml to contain: \n%s\n", currChart.Name(), string(b))
+			changesToAdd += fmt.Sprintf("Modify to %s/values.yaml to contain: \n%s\n", root.Name(), string(b))
 		}
 		if changed && checker.OverwriteChanges {
-			_ = chartutil.SaveDir(currChart, checker.ChartDir)
+			_ = chartutil.SaveDir(root, checker.ChartDir)
 		}
 	}
 	return changed, changesToAdd, nil
