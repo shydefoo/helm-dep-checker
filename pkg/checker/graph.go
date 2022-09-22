@@ -16,23 +16,82 @@ type Graph struct {
 }
 
 const (
-	JobChartName = "generic-helm-installer"
+	JobChartName = "generic-dep-installer"
+	HelmChartKey = "helmChart"
 )
 
+func IsGenericInstaller(c *chart.Chart) bool {
+	return c.Name() == JobChartName
+}
+
 func getChartHash(c *chart.Chart) string {
-	if c.Name() == JobChartName {
+	if IsGenericInstaller(c) {
 		return getGenInstallerHash(c)
 	}
 	return fmt.Sprintf("%s-%s", c.Name(), c.Metadata.Version)
 }
 
 func getGenInstallerHash(c *chart.Chart) string {
-	dep := GetDependencyObj(c)
-	return fmt.Sprintf("%s-%s", dep.Name, dep.Version)
+	job := GetJobInfo(c)
+	if job == nil {
+		return fmt.Sprintf("INSTALLER_HASH_NOT_FOUND %s", c.Name())
+	}
+	return fmt.Sprintf("%s-%s-%s", job.Chart, job.Version, job.Release)
 }
 
 func getDepHash(d *chart.Dependency) string {
 	return fmt.Sprintf("%s-%s", d.Name, d.Version)
+}
+
+func getDepHashFromParent(pC *chart.Chart, d *chart.Dependency) string {
+	if d.Name == JobChartName {
+		return getGenInstallerHash(pC)
+	}
+	return fmt.Sprintf("%s-%s", d.Name, d.Version)
+}
+
+// GetJobInfo returns matching dependency chart from parent charts Metadata.Dependency
+// field. Only applies to immediate parent of chart
+func GetJobInfo(c *chart.Chart) *JobValues {
+	parent := c.Parent()
+	if parent == nil {
+		return nil
+	}
+	var gI *chart.Dependency
+	gI = nil
+	for _, d := range parent.Metadata.Dependencies {
+		if d.Name == c.Name() {
+			gI = d
+			break
+		}
+	}
+	if gI == nil {
+		log.Println("Cannot find job Values for chart ", c.Name())
+		return nil
+	}
+	name := nameOrAlias(gI)
+	jv := JobValues{}
+	var hc map[string]interface{}
+	if values, ok := parent.Values[name]; ok {
+		val := values.(map[string]interface{})
+		hc, _ = val["helmChart"].(map[string]interface{})
+		if v, ok := hc["repository"]; ok {
+			jv.Repository = v.(string)
+		}
+		if v, ok := hc["chart"]; ok {
+			jv.Chart = v.(string)
+		}
+		if v, ok := hc["version"]; ok {
+			jv.Version = v.(string)
+		}
+		if v, ok := hc["namespace"]; ok {
+			jv.Namespace = v.(string)
+		}
+		if v, ok := hc["release"]; ok {
+			jv.Release = v.(string)
+		}
+	}
+	return &jv
 }
 
 func ConstructGraph(charts []*chart.Chart) (*Graph, error) {

@@ -36,59 +36,60 @@ func (checker *Checker) CollectChanges(rMap map[string]*Report, g *Graph) (bool,
 	valuesFileChanged := false
 	for c, r := range rMap {
 		currChart := g.CMap[c]
-		parentsMap := make(map[string][]*chart.Dependency)
+		depAncestorMap := make(map[string][]*chart.Dependency)
 		modifiedValues := make(map[string]interface{})
 		newDepList := []*chart.Dependency{}
 		// Iterate through all dependencies
-		for _, dep := range r.FullDeps {
-			if _, ok := r.LookUp[getChartHash(dep)]; !ok {
+		for _, depC := range r.FullDeps {
+			depAncestors, ok := r.LookUp[getChartHash(depC)]
+			if !ok {
 				continue
 			}
-			parents := r.LookUp[getChartHash(dep)]
 			// create mapping of parent chart to metadata dependencies
-			for _, p := range parents {
-				parentsMap[getChartHash(p)] = p.Metadata.Dependencies
+			for _, p := range depAncestors {
+				depAncestorMap[getChartHash(p)] = p.Metadata.Dependencies
 			}
 
 			var d chart.Dependency
-			dStructList := parents[0].Metadata.Dependencies
+			selectedParent := depAncestors[0]
 			// Search through list of dependencies to find dependency to add to Parent currChart
-			for _, i := range dStructList {
-				if getDepHash(i) == getChartHash(dep) {
-					d = *i
-					log.Printf("adding dep %s-%s to chart %s\n", d.Name, d.Version, currChart.Name())
-					addedDeps = true
-					newDep := &chart.Dependency{Name: d.Name,
-						Version:    d.Version,
-						Repository: d.Repository,
-						Condition:  fmt.Sprintf("%s.%s", d.Name, "enabled"),
-						Alias:      d.Alias,
-						Enabled:    true,
-					}
-					currChart.Metadata.Dependencies = append(currChart.Metadata.Dependencies, newDep)
-					newDepList = append(newDepList, newDep)
-					// Collect changes to instruct users to make changes to Values.yaml
-					found, _ := SetValues(currChart, true, d.Condition, modifiedValues)
-					valuesFileChanged = valuesFileChanged || found
+			for _, i := range selectedParent.Metadata.Dependencies {
+				if getDepHashFromParent(depC, i) != getChartHash(depC) {
+					continue
 				}
+				d = *i
+				log.Printf("adding dep %s-%s to chart %s\n", d.Name, d.Version, currChart.Name())
+				addedDeps = true
+				newDep := &chart.Dependency{
+					Name:       d.Name,
+					Version:    d.Version,
+					Repository: d.Repository,
+					Condition:  fmt.Sprintf("%s.%s", nameOrAlias(&d), "enabled"),
+					Alias:      d.Alias,
+					Enabled:    true,
+				}
+				currChart.Metadata.Dependencies = append(currChart.Metadata.Dependencies, newDep)
+				newDepList = append(newDepList, newDep)
+				// Collect changes to instruct users to make changes to Values.yaml
+				found, _ := SetValues(currChart, true, d.Condition, modifiedValues)
+				if IsGenericInstaller(depC) {
+					helmChartV := depC.Parent().Values[nameOrAlias(&d)].(map[string]interface{})[HelmChartKey]
+					found, _ = SetValues(currChart, helmChartV, fmt.Sprintf("%s.%s", nameOrAlias(&d), HelmChartKey), modifiedValues)
+				}
+				valuesFileChanged = valuesFileChanged || found
 			}
 			// Search for existing dependencies to disable grandchild dependencies
 			for _, currChartDep := range currChart.Metadata.Dependencies {
-				if _, ok := parentsMap[getDepHash(currChartDep)]; !ok {
+				pdeps, ok := depAncestorMap[getDepHashFromParent(currChart, currChartDep)]
+				if !ok {
 					continue
 				}
-				pdeps := parentsMap[getDepHash(currChartDep)]
 				pdepCond := ""
 				for _, pdep := range pdeps {
-					if getDepHash(pdep) == getChartHash(dep) {
+					if getDepHashFromParent(depC, pdep) == getChartHash(depC) {
 						pdepCond = pdep.Condition
 						// This will modify values.yaml and lose any comments
-						var nameToUse string
-						if currChartDep.Alias != "" {
-							nameToUse = currChartDep.Alias
-						} else {
-							nameToUse = currChartDep.Name
-						}
+						nameToUse := nameOrAlias(currChartDep)
 						found, _ := SetValues(currChart, false, fmt.Sprintf("%s.%s", nameToUse, pdepCond), modifiedValues)
 						valuesFileChanged = valuesFileChanged || found
 					}
@@ -160,6 +161,12 @@ func GetCharts(chartDir string) ([]*chart.Chart, error) {
 	return charts, nil
 }
 func parsePath(key string) []string { return strings.Split(key, ".") }
+func nameOrAlias(d *chart.Dependency) string {
+	if d.Alias != "" {
+		return d.Alias
+	}
+	return d.Name
+}
 
 func SetValues(chart *chart.Chart, v interface{}, p string, currMap map[string]interface{}) (bool, map[string]interface{}) {
 	values := chart.Values
