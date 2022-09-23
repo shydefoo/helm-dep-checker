@@ -1,18 +1,20 @@
 package checker
 
 import (
+	"errors"
 	"fmt"
 	"log"
 
 	"helm.sh/helm/v3/pkg/chart"
 )
 
-type graphM map[string][]*chart.Chart
-type chartM map[string]*chart.Chart
+type graphM map[string][]*ChartW
+type chartM map[string]*ChartW
 
 type Graph struct {
 	GMap graphM
 	CMap chartM
+	RMap map[string]bool
 }
 
 const (
@@ -26,26 +28,39 @@ func IsGenericInstaller(c *chart.Chart) bool {
 
 func getChartHash(c *chart.Chart) string {
 	if IsGenericInstaller(c) {
-		return getGenInstallerHash(c)
+		jHash, _ := getGenInstallerHash(c)
+		return jHash
 	}
+	return getNormalHash(c)
+}
+
+func getNormalHash(c *chart.Chart) string {
 	return fmt.Sprintf("%s-%s", c.Name(), c.Metadata.Version)
 }
 
-func getGenInstallerHash(c *chart.Chart) string {
+func getGenInstallerHash(c *chart.Chart) (string, *JobValues) {
 	job := GetJobInfo(c)
 	if job == nil {
-		return fmt.Sprintf("INSTALLER_HASH_NOT_FOUND %s", c.Name())
+		return "", job
 	}
-	return fmt.Sprintf("%s-%s-%s", job.Chart, job.Version, job.Release)
+	return fmt.Sprintf("%s-%s-%s", job.Chart, job.Version, job.Release), job
 }
 
+func getGenInstallerHashStrict(c *chart.Chart) (string, *JobValues, error) {
+	job := GetJobInfo(c)
+	if job == nil {
+		return "", job, errors.New("Job is nil")
+	}
+	return fmt.Sprintf("%s-%s-%s", job.Chart, job.Version, job.Release), job, nil
+}
 func getDepHash(d *chart.Dependency) string {
 	return fmt.Sprintf("%s-%s", d.Name, d.Version)
 }
 
-func getDepHashFromParent(pC *chart.Chart, d *chart.Dependency) string {
+func getDepHashFromParent(pC *ChartW, d *chart.Dependency) string {
 	if d.Name == JobChartName {
-		return getGenInstallerHash(pC)
+		// jHash, _ := getGenInstallerHash(pC)
+		return pC.ChartHash
 	}
 	return fmt.Sprintf("%s-%s", d.Name, d.Version)
 }
@@ -94,75 +109,79 @@ func GetJobInfo(c *chart.Chart) *JobValues {
 	return &jv
 }
 
-func ConstructGraph(charts []*chart.Chart) (*Graph, error) {
-	g := make(map[string][]*chart.Chart)
-	cM := make(map[string]*chart.Chart)
-	var _makeGraph func(*chart.Chart)
-	_makeGraph = func(c *chart.Chart) {
-		chash := getChartHash(c)
+func ConstructGraph(charts []*ChartW) (*Graph, error) {
+	g := make(map[string][]*ChartW)
+	cM := make(map[string]*ChartW)
+	rM := make(map[string]bool)
+	var _makeGraph func(*ChartW)
+	_makeGraph = func(c *ChartW) {
+		chash := c.ChartHash
 		if _, ok := cM[chash]; !ok {
 			cM[chash] = c
 		}
 		if _, ok := g[chash]; !ok {
-			g[chash] = c.Dependencies()
-			for _, d := range c.Dependencies() {
+			g[chash] = c.DepsW
+			for _, d := range c.DepsW {
+				rM[d.ChartHash] = false
 				_makeGraph(d)
 			}
 		}
 	}
 	for _, c := range charts {
-		if c.IsRoot() {
-			// Only construct graph for root charts, dependency charts will get added in through MakeGraph
-			_makeGraph(c)
-		}
+		// set all charts to be roots
+		rM[c.ChartHash] = true
+	}
+	for _, c := range charts {
+		// Only construct graph for root charts, dependency charts will get added in through MakeGraph
+		_makeGraph(c)
 	}
 	graph := &Graph{
-		GMap: g, CMap: cM,
+		GMap: g, CMap: cM, RMap: rM,
 	}
 	return graph, nil
 }
 
 type Report struct {
-	FullDeps []*chart.Chart
-	LookUp   map[string][]*chart.Chart
+	FullDeps []*ChartW
+	LookUp   map[string][]*ChartW
 }
 
-func WalkGraph(g *Graph, rootChart *chart.Chart) map[string]*Report {
+func WalkGraph(g *Graph) map[string]*Report {
 	log.Println("walkgraph")
 	report := make(map[string]*Report)
-	var traverse func(c *chart.Chart) []*chart.Chart
-	traverse = func(c *chart.Chart) []*chart.Chart {
-		currentChash := getChartHash(c)
-		depList := []*chart.Chart{}
-		commonDep := []*chart.Chart{}
+	var traverse func(c *ChartW) []*ChartW
+	traverse = func(c *ChartW) []*ChartW {
+		currentChash := c.ChartHash
+		depList := []*ChartW{}
+		commonDep := []*ChartW{}
 
 		// stores mapping between child chart and list of parent charts
-		depMap := make(map[string][]*chart.Chart)
-		existingDeps := g.GMap[getChartHash(c)]
+		depMap := make(map[string][]*ChartW)
+		existingDeps := g.GMap[c.ChartHash]
 		if len(existingDeps) == 0 {
 			return depList
 		}
 		for _, d := range existingDeps {
 			childDeps := traverse(d)
 			for _, dGrand := range childDeps {
-				if _, ok := depMap[getChartHash(dGrand)]; !ok {
-					depMap[getChartHash(dGrand)] = []*chart.Chart{d}
+				if _, ok := depMap[dGrand.ChartHash]; !ok {
+					depMap[dGrand.ChartHash] = []*ChartW{d}
 				} else {
-					depMap[getChartHash(dGrand)] = append(depMap[getChartHash(dGrand)], d)
+					depMap[dGrand.ChartHash] = append(depMap[dGrand.ChartHash], d)
 					commonDep = append(commonDep, dGrand)
 				}
 			}
 		}
-		depSet := make(map[string]*chart.Chart)
+		depSet := make(map[string]*ChartW)
 		for _, s := range existingDeps {
-			chash := getChartHash(s)
+			chash := s.ChartHash
 			if _, ok := depSet[chash]; !ok {
 				depSet[chash] = s
 			}
 		}
 		newDepsFound := false
 		for _, d := range commonDep {
-			chash := getChartHash(d)
+			chash := d.ChartHash
 			if _, ok := depSet[chash]; !ok {
 				depSet[chash] = d
 				log.Printf("New Deps found: %s", chash)
@@ -179,6 +198,13 @@ func WalkGraph(g *Graph, rootChart *chart.Chart) map[string]*Report {
 		}
 		return depList
 	}
-	_ = traverse(rootChart)
+	// _ = traverse(rootChart)
+	for k, v := range g.RMap {
+		if v {
+			log.Println("traversing", k)
+			_ = traverse(g.CMap[k])
+		}
+	}
+
 	return report
 }

@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"helm.sh/helm/v3/pkg/action"
+	"helm.sh/helm/v3/pkg/chart"
 	"helm.sh/helm/v3/pkg/cli"
 	"helm.sh/helm/v3/pkg/downloader"
 	"helm.sh/helm/v3/pkg/getter"
@@ -18,6 +19,52 @@ type JobValues struct {
 	Version    string `json:"version"`
 	Namespace  string `json:"namespace"`
 	Release    string `json:"release"`
+}
+type ChartType int
+
+const (
+	Normal ChartType = iota
+	GenericInstaller
+)
+
+type ChartW struct {
+	*chart.Chart
+	ChartHash string
+	CType     ChartType
+	Job       *JobValues
+	DepsW     []*ChartW
+}
+
+func NewChartW(c *chart.Chart) (*ChartW, error) {
+	var newChartFunc func(c *chart.Chart) (*ChartW, error)
+	newChartFunc = func(c *chart.Chart) (*ChartW, error) {
+		cW := ChartW{}
+		cW.Chart = c
+		var err error
+		if IsGenericInstaller(c) {
+			cW.CType = GenericInstaller
+			cW.ChartHash, cW.Job, err = getGenInstallerHashStrict(c)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			cW.CType = Normal
+			cW.ChartHash = getChartHash(c)
+		}
+		for _, d := range c.Dependencies() {
+			n, err := newChartFunc(d)
+			if err != nil {
+				return nil, err
+			}
+			cW.DepsW = append(cW.DepsW, n)
+		}
+		return &cW, nil
+	}
+	cW, err := newChartFunc(c)
+	if err != nil {
+		return nil, err
+	}
+	return cW, nil
 }
 
 var settings = cli.New()
@@ -49,5 +96,4 @@ func setup(chartpath string, out io.Writer) (*downloader.Manager, error) {
 		Debug:            settings.Debug,
 	}
 	return man, nil
-
 }

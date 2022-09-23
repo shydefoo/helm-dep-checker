@@ -17,9 +17,9 @@ import (
 )
 
 type Checker struct {
-	ChartDir                    string
-	RootChartName, RootChartVer string
-	OverwriteChanges            bool
+	ChartDir string
+	// RootChartName, RootChartVer string
+	OverwriteChanges bool
 }
 
 func (checker *Checker) CollectChanges(rMap map[string]*Report, g *Graph) (bool, string, error) {
@@ -42,20 +42,20 @@ func (checker *Checker) CollectChanges(rMap map[string]*Report, g *Graph) (bool,
 		newDepList := []*chart.Dependency{}
 		// Iterate through all dependencies
 		for _, depC := range r.FullDeps {
-			depAncestors, ok := r.LookUp[getChartHash(depC)]
+			depAncestors, ok := r.LookUp[depC.ChartHash]
 			if !ok {
 				continue
 			}
 			// create mapping of parent chart to metadata dependencies
 			for _, p := range depAncestors {
-				depAncestorMap[getChartHash(p)] = p.Metadata.Dependencies
+				depAncestorMap[depC.ChartHash] = p.Metadata.Dependencies
 			}
 
 			var d chart.Dependency
 			selectedParent := depC.Parent()
 			// Search through list of dependencies to find dependency to add to Parent currChart
 			for _, i := range selectedParent.Metadata.Dependencies {
-				if getDepHashFromParent(depC, i) != getChartHash(depC) {
+				if getDepHashFromParent(depC, i) != depC.ChartHash {
 					continue
 				}
 				d = *i
@@ -81,10 +81,10 @@ func (checker *Checker) CollectChanges(rMap map[string]*Report, g *Graph) (bool,
 					addedDeps = true
 				}
 				// Collect changes to instruct users to make changes to Values.yaml
-				found, _ := SetValues(root, true, d.Condition, modifiedValues)
-				if IsGenericInstaller(depC) {
+				found, _ := BuildValues(root, true, d.Condition, modifiedValues)
+				if depC.CType == GenericInstaller {
 					helmChartV := depC.Parent().Values[nameToUse].(map[string]interface{})[HelmChartKey]
-					found, _ = SetValues(root, helmChartV, fmt.Sprintf("%s.%s", nameToUse, HelmChartKey), modifiedValues)
+					found, _ = BuildValues(root, helmChartV, fmt.Sprintf("%s.%s", nameToUse, HelmChartKey), modifiedValues)
 				}
 				valuesFileChanged = valuesFileChanged || found
 			}
@@ -94,13 +94,12 @@ func (checker *Checker) CollectChanges(rMap map[string]*Report, g *Graph) (bool,
 				if !ok {
 					continue
 				}
-				pdepCond := ""
 				for _, pdep := range pdeps {
-					if getDepHashFromParent(depC, pdep) == getChartHash(depC) {
-						pdepCond = pdep.Condition
+					if getDepHashFromParent(depC, pdep) == depC.ChartHash {
 						nameToUse := nameOrAlias(rootChartDep)
-						found, _ := SetValues(root, false, fmt.Sprintf("%s.%s", nameToUse, pdepCond), modifiedValues)
+						found, _ := BuildValues(root, false, fmt.Sprintf("%s.%s", nameToUse, pdep.Condition), modifiedValues)
 						valuesFileChanged = valuesFileChanged || found
+						break
 					}
 				}
 			}
@@ -122,16 +121,16 @@ func (checker *Checker) CollectChanges(rMap map[string]*Report, g *Graph) (bool,
 			changesToAdd += fmt.Sprintf("Modify to %s/values.yaml to contain: \n%s\n", root.Name(), string(b))
 		}
 		if changed && checker.OverwriteChanges {
-			_ = chartutil.SaveDir(root, checker.ChartDir)
+			_ = chartutil.SaveDir(root.Chart, checker.ChartDir)
 		}
 	}
 	return changed, changesToAdd, nil
 }
 
-func GetCharts(chartDir string) ([]*chart.Chart, error) {
+func GetCharts(chartDir string) ([]*ChartW, error) {
 	// chartDir := "./test-charts"
 	log.Println("Get charts")
-	charts := []*chart.Chart{}
+	charts := []*ChartW{}
 	files, err := ioutil.ReadDir(chartDir)
 	if err != nil {
 		log.Fatal(err)
@@ -158,7 +157,11 @@ func GetCharts(chartDir string) ([]*chart.Chart, error) {
 					log.Fatal(err)
 					return err
 				}
-				charts = append(charts, c)
+				chartWrapper, err := NewChartW(c)
+				if err != nil {
+					return err
+				}
+				charts = append(charts, chartWrapper)
 				return nil
 			})
 		}
@@ -177,7 +180,7 @@ func nameOrAlias(d *chart.Dependency) string {
 	return d.Name
 }
 
-func SetValues(chart *chart.Chart, v interface{}, p string, currMap map[string]interface{}) (bool, map[string]interface{}) {
+func BuildValues(chart *ChartW, v interface{}, p string, currMap map[string]interface{}) (bool, map[string]interface{}) {
 	values := chart.Values
 	// log.Printf("setting %s of %s to %v\n", p, chart.Name(), v)
 	paths := parsePath(p)
@@ -200,7 +203,7 @@ func SetValues(chart *chart.Chart, v interface{}, p string, currMap map[string]i
 	for i := 0; i < len(paths)-1; i++ {
 		currPath := paths[i]
 		if _, ok := tmp[currPath]; !ok {
-			// if field no present, shortcircuit immediately
+			// if field no present, return immediately
 			return needsChange, currMap
 		}
 		tmp = tmp[currPath].(map[string]interface{})
