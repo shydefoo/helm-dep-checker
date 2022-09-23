@@ -33,11 +33,24 @@ type ChartW struct {
 	CType     ChartType
 	Job       *JobValues
 	DepsW     []*ChartW
+	ParentW   *ChartW
+	MetaDeps  []*MetadataDepW
+}
+
+func (cW *ChartW) AddMetadataDepdency(d *MetadataDepW) {
+	cW.MetaDeps = append(cW.MetaDeps, d)
+	cW.Metadata.Dependencies = append(cW.Metadata.Dependencies, d.Dependency)
+}
+
+type MetadataDepW struct {
+	*chart.Dependency
+	DepHash string
 }
 
 func NewChartW(c *chart.Chart) (*ChartW, error) {
-	var newChartFunc func(c *chart.Chart) (*ChartW, error)
-	newChartFunc = func(c *chart.Chart) (*ChartW, error) {
+	var newChartFunc func(c *chart.Chart, p *ChartW) (*ChartW, error)
+	newChartFunc = func(c *chart.Chart, p *ChartW) (*ChartW, error) {
+		log.Println("Generating new chart for", c.Name())
 		cW := ChartW{}
 		cW.Chart = c
 		var err error
@@ -51,8 +64,15 @@ func NewChartW(c *chart.Chart) (*ChartW, error) {
 			cW.CType = Normal
 			cW.ChartHash = getChartHash(c)
 		}
+		for _, d := range c.Metadata.Dependencies {
+			m := NewMetaDep(c, d)
+			cW.MetaDeps = append(cW.MetaDeps, m)
+		}
+		if p != nil {
+			cW.ParentW = p
+		}
 		for _, d := range c.Dependencies() {
-			n, err := newChartFunc(d)
+			n, err := newChartFunc(d, &cW)
 			if err != nil {
 				return nil, err
 			}
@@ -60,11 +80,15 @@ func NewChartW(c *chart.Chart) (*ChartW, error) {
 		}
 		return &cW, nil
 	}
-	cW, err := newChartFunc(c)
+	cW, err := newChartFunc(c, nil)
 	if err != nil {
 		return nil, err
 	}
 	return cW, nil
+}
+
+func NewMetaDep(c *chart.Chart, d *chart.Dependency) *MetadataDepW {
+	return &MetadataDepW{Dependency: d, DepHash: getDepHash(c, d)}
 }
 
 var settings = cli.New()

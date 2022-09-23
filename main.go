@@ -10,10 +10,10 @@ import (
 )
 
 var chartPath = flag.String("p", "", "Path the helm charts")
-var rCName = flag.String("r", "root", "Root chart name")
-var rCVersion = flag.String("v", "0.1.0", "Root chart version")
 
 func main() {
+	flag.Parse()
+	log.Println("chartPath", *chartPath)
 	mc := checker.Checker{ChartDir: *chartPath}
 	c, err := checker.GetCharts(mc.ChartDir)
 	if err != nil {

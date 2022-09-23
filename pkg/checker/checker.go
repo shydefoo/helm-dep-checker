@@ -37,7 +37,7 @@ func (checker *Checker) CollectChanges(rMap map[string]*Report, g *Graph) (bool,
 	valuesFileChanged := false
 	for c, r := range rMap {
 		root := g.CMap[c]
-		depAncestorMap := make(map[string][]*chart.Dependency)
+		depAncestorMap := make(map[string][]*MetadataDepW)
 		modifiedValues := make(map[string]interface{})
 		newDepList := []*chart.Dependency{}
 		// Iterate through all dependencies
@@ -48,17 +48,17 @@ func (checker *Checker) CollectChanges(rMap map[string]*Report, g *Graph) (bool,
 			}
 			// create mapping of parent chart to metadata dependencies
 			for _, p := range depAncestors {
-				depAncestorMap[depC.ChartHash] = p.Metadata.Dependencies
+				depAncestorMap[depC.ChartHash] = p.MetaDeps
 			}
 
 			var d chart.Dependency
-			selectedParent := depC.Parent()
+			selectedParent := depC.ParentW
 			// Search through list of dependencies to find dependency to add to Parent currChart
-			for _, i := range selectedParent.Metadata.Dependencies {
-				if getDepHashFromParent(depC, i) != depC.ChartHash {
+			for _, i := range selectedParent.MetaDeps {
+				if i.DepHash != depC.ChartHash {
 					continue
 				}
-				d = *i
+				d = *i.Dependency
 				nameToUse := nameOrAlias(&d)
 				newDep := &chart.Dependency{
 					Name:       d.Name,
@@ -69,14 +69,19 @@ func (checker *Checker) CollectChanges(rMap map[string]*Report, g *Graph) (bool,
 					Enabled:    true,
 				}
 				addDep := true
-				for _, rootDep := range root.Metadata.Dependencies {
-					if getDepHashFromParent(root, rootDep) == getDepHashFromParent(depC, i) {
+				newMetaD := MetadataDepW{newDep, i.DepHash}
+
+				// check if root.Metadata.Dependencies already has dependency added
+				for _, rootDep := range root.MetaDeps {
+					if rootDep.DepHash == i.DepHash {
 						addDep = false
+						break
 					}
 				}
 				if addDep {
 					log.Printf("Add dep %s-%s to chart %s\n", d.Name, d.Version, root.Name())
-					root.Metadata.Dependencies = append(root.Metadata.Dependencies, newDep)
+					// root.Metadata.Dependencies = append(root.Metadata.Dependencies, newDep)
+					root.AddMetadataDepdency(&newMetaD)
 					newDepList = append(newDepList, newDep)
 					addedDeps = true
 				}
@@ -89,14 +94,14 @@ func (checker *Checker) CollectChanges(rMap map[string]*Report, g *Graph) (bool,
 				valuesFileChanged = valuesFileChanged || found
 			}
 			// Search for existing dependencies to disable grandchild dependencies
-			for _, rootChartDep := range root.Metadata.Dependencies {
-				pdeps, ok := depAncestorMap[getDepHashFromParent(root, rootChartDep)]
+			for _, rootChartDep := range root.MetaDeps {
+				pdeps, ok := depAncestorMap[rootChartDep.DepHash]
 				if !ok {
 					continue
 				}
 				for _, pdep := range pdeps {
-					if getDepHashFromParent(depC, pdep) == depC.ChartHash {
-						nameToUse := nameOrAlias(rootChartDep)
+					if pdep.DepHash == depC.ChartHash {
+						nameToUse := nameOrAlias(rootChartDep.Dependency)
 						found, _ := BuildValues(root, false, fmt.Sprintf("%s.%s", nameToUse, pdep.Condition), modifiedValues)
 						valuesFileChanged = valuesFileChanged || found
 						break
@@ -130,7 +135,8 @@ func (checker *Checker) CollectChanges(rMap map[string]*Report, g *Graph) (bool,
 func GetCharts(chartDir string) ([]*ChartW, error) {
 	// chartDir := "./test-charts"
 	log.Println("Get charts")
-	charts := []*ChartW{}
+	charts := []*chart.Chart{}
+	chartsW := []*ChartW{}
 	files, err := ioutil.ReadDir(chartDir)
 	if err != nil {
 		log.Fatal(err)
@@ -157,11 +163,7 @@ func GetCharts(chartDir string) ([]*ChartW, error) {
 					log.Fatal(err)
 					return err
 				}
-				chartWrapper, err := NewChartW(c)
-				if err != nil {
-					return err
-				}
-				charts = append(charts, chartWrapper)
+				charts = append(charts, c)
 				return nil
 			})
 		}
@@ -170,7 +172,16 @@ func GetCharts(chartDir string) ([]*ChartW, error) {
 		log.Fatal(err)
 		return nil, err
 	}
-	return charts, nil
+
+	for _, c := range charts {
+		chartWrapper, err := NewChartW(c)
+		if err != nil {
+			return nil, err
+		}
+		chartsW = append(chartsW, chartWrapper)
+
+	}
+	return chartsW, nil
 }
 func parsePath(key string) []string { return strings.Split(key, ".") }
 func nameOrAlias(d *chart.Dependency) string {
