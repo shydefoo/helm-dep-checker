@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/google/go-cmp/cmp"
 	"golang.org/x/sync/errgroup"
 	"gopkg.in/yaml.v2"
 	"helm.sh/helm/v3/pkg/chart"
@@ -59,8 +60,6 @@ func (checker *Checker) CollectChanges(rMap map[string]*Report, g *Graph) (bool,
 				}
 				d = *i
 				nameToUse := nameOrAlias(&d)
-				log.Printf("Add dep %s-%s to chart %s\n", d.Name, d.Version, root.Name())
-				addedDeps = true
 				newDep := &chart.Dependency{
 					Name:       d.Name,
 					Version:    d.Version,
@@ -69,8 +68,18 @@ func (checker *Checker) CollectChanges(rMap map[string]*Report, g *Graph) (bool,
 					Alias:      d.Alias,
 					Enabled:    true,
 				}
-				root.Metadata.Dependencies = append(root.Metadata.Dependencies, newDep)
-				newDepList = append(newDepList, newDep)
+				addDep := true
+				for _, rootDep := range root.Metadata.Dependencies {
+					if getDepHashFromParent(root, rootDep) == getDepHashFromParent(depC, i) {
+						addDep = false
+					}
+				}
+				if addDep {
+					log.Printf("Add dep %s-%s to chart %s\n", d.Name, d.Version, root.Name())
+					root.Metadata.Dependencies = append(root.Metadata.Dependencies, newDep)
+					newDepList = append(newDepList, newDep)
+					addedDeps = true
+				}
 				// Collect changes to instruct users to make changes to Values.yaml
 				found, _ := SetValues(root, true, d.Condition, modifiedValues)
 				if IsGenericInstaller(depC) {
@@ -196,7 +205,7 @@ func SetValues(chart *chart.Chart, v interface{}, p string, currMap map[string]i
 		}
 		tmp = tmp[currPath].(map[string]interface{})
 	}
-	if val, ok := tmp[paths[len(paths)-1]]; ok && val == v {
+	if val, ok := tmp[paths[len(paths)-1]]; ok && cmp.Equal(val, v) {
 		needsChange = false
 	}
 	return needsChange, currMap
