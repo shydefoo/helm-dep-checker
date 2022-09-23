@@ -15,6 +15,7 @@ var rCName = flag.String("r", "root", "Root chart name")
 var rCVersion = flag.String("v", "0.1.0", "Root chart version")
 
 func main() {
+	flag.Parse()
 	mc := checker.Checker{ChartDir: *chartPath, RootChartName: *rCName, RootChartVer: *rCVersion}
 	// mc := checker.Checker{ChartDir: "/tmp/test-charts/test_chart_3478466454", RootChartName: "root", RootChartVer: "0.1.0"}
 	c, err := checker.GetCharts(mc.ChartDir)
