@@ -1,0 +1,12 @@
+dependencies:
+- name: a
+  repository: file:///Users/shide.foo/repos/shide/caraml-dep-checker/test-charts/my-charts/a
+  version: 0.1.0
+- name: b
+  repository: file:///Users/shide.foo/repos/shide/caraml-dep-checker/test-charts/my-charts/b
+  version: 0.1.0
+- name: d
+  repository: file:///Users/shide.foo/repos/shide/caraml-dep-checker/test-charts/my-charts/d
+  version: 0.1.0
+digest: sha256:d2ffe321ccdb01187a9ab735c77c3a8d2c45cccdb5b25f8ddb339da4c93fda8a
+generated: "2022-09-24T22:04:45.288081+08:00"

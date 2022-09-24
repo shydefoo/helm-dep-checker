@@ -1,0 +1,15 @@
+apiVersion: v2
+appVersion: 0.1.0
+dependencies:
+- condition: e.enabled
+  name: e
+  repository: file:///Users/shide.foo/repos/shide/caraml-dep-checker/test-charts/my-charts/e
+  version: 0.1.0
+- condition: f.enabled
+  name: f
+  repository: file:///Users/shide.foo/repos/shide/caraml-dep-checker/test-charts/my-charts/f
+  version: 0.1.0
+description: A Helm chart for Kubernetes
+name: c
+type: application
+version: 0.1.0
