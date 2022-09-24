@@ -14,12 +14,13 @@ import (
 )
 
 var srcChartPath = flag.String("s", "./test-charts/foo", "source chart path")
-var dagPath = flag.String("d", "/tmp/helm_struct.json", "Path to helm chart graph definition")
+var dagPath = flag.String("dag", "/tmp/helm_struct.json", "Path to helm chart graph definition")
+var path = flag.String("dest", "./test-charts/my-charts", "Destination directory")
 
 func GenerateChart(srcChartPath string, input map[string][]string, root string, destPath string) (string, error) {
 	var makeCharts func(string) (map[string]string, error)
 	log.Println("Generate chart")
-	path, err := os.MkdirTemp(destPath, "test_chart_*")
+	err := os.MkdirAll(destPath, 0744)
 	if err != nil {
 		log.Fatal(err)
 		return "", err
@@ -43,8 +44,8 @@ func GenerateChart(srcChartPath string, input map[string][]string, root string, 
 			deps = append(deps, &chart.Dependency{Name: d, Repository: fmt.Sprintf("file://%s", depMap[d]), Version: "0.1.0", Condition: fmt.Sprintf("%s.enabled", d)})
 		}
 		cfile.Dependencies = deps
-		cp := filepath.Join(path, cname)
-		err = chartutil.CreateFrom(cfile, path, srcChartPath)
+		cp := filepath.Join(destPath, cname)
+		err = chartutil.CreateFrom(cfile, destPath, srcChartPath)
 		if err != nil {
 			return nil, err
 		}
@@ -57,8 +58,8 @@ func GenerateChart(srcChartPath string, input map[string][]string, root string, 
 		log.Fatal(err)
 		return "", err
 	}
-	log.Println("Charts dir", path)
-	return path, nil
+	log.Println("Charts dir", destPath)
+	return destPath, nil
 }
 
 func main() {
@@ -73,7 +74,14 @@ func main() {
 		log.Fatal(err)
 		panic(err)
 	}
-	_, err = GenerateChart(*srcChartPath, x, "root", "/tmp/test-charts")
+	fullPath, err := filepath.Abs(*path)
+	if err != nil {
+		panic(err)
+	}
+	if _, err := os.Stat(fullPath); err == nil {
+		os.Remove(fullPath)
+	}
+	_, err = GenerateChart(*srcChartPath, x, "root", fullPath)
 	if err != nil {
 		panic(err)
 	}
