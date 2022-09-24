@@ -1,53 +1,105 @@
 package checker
 
 import (
-	"fmt"
-	"io"
-	"log"
-	"os"
+	"github.com/rs/zerolog/log"
 
-	"helm.sh/helm/v3/pkg/action"
-	"helm.sh/helm/v3/pkg/cli"
-	"helm.sh/helm/v3/pkg/downloader"
-	"helm.sh/helm/v3/pkg/getter"
+	"helm.sh/helm/v3/pkg/chart"
+	"helm.sh/helm/v3/pkg/chartutil"
 )
 
-type JobValues struct {
-	Repository string `json:"repository"`
-	Chart      string `json:"chart"`
-	Version    string `json:"version"`
-	Namespace  string `json:"namespace"`
-	Release    string `json:"release"`
+type ChartType int
+
+const (
+	Normal ChartType = iota
+	GenericInstaller
+)
+
+type ChartW struct {
+	*chart.Chart
+	ChartHash string
+	CType     ChartType
+	DepsW     []*ChartW
+	ParentW   *ChartW
 }
 
-var settings = cli.New()
-
-func debug(format string, v ...interface{}) {
-	if settings.Debug {
-		format = fmt.Sprintf("[debug] %s\n", format)
-		_ = log.Output(2, fmt.Sprintf(format, v...))
+func (c *ChartW) Log() {
+	cNames := []string{}
+	for _, cw := range c.DepsW {
+		cNames = append(cNames, cw.ChartHash)
 	}
+	log.Debug().Msgf("chartHash=%s, Deps=%s", c.ChartHash, cNames)
 }
 
-func setup(chartpath string, out io.Writer) (*downloader.Manager, error) {
+// func (cW *ChartW) AddMetadataDepdency(d *MetadataDepW) {
+// 	cW.MetaDeps = append(cW.MetaDeps, d)
+// 	cW.Metadata.Dependencies = append(cW.Metadata.Dependencies, d.Dependency)
+// }
 
-	actionConfig := new(action.Configuration)
-	helmDriver := os.Getenv("HELM_DRIVER")
-	if err := actionConfig.Init(settings.RESTClientGetter(), settings.Namespace(), helmDriver, debug); err != nil {
-		log.Fatal(err)
-	}
-	client := action.NewDependency()
-	man := &downloader.Manager{
-		Out:              out,
-		ChartPath:        chartpath,
-		Keyring:          client.Keyring,
-		SkipUpdate:       client.SkipRefresh,
-		Getters:          getter.All(settings),
-		RegistryClient:   actionConfig.RegistryClient,
-		RepositoryConfig: settings.RepositoryConfig,
-		RepositoryCache:  settings.RepositoryCache,
-		Debug:            settings.Debug,
-	}
-	return man, nil
+// type MetadataDepW struct {
+// 	*chart.Dependency
+// 	DepHash string
+// }
 
+func getAliasDependency(charts []*chart.Chart, dep *chart.Dependency) *chart.Chart {
+	for _, c := range charts {
+		if c == nil {
+			continue
+		}
+		if c.Name() != dep.Name {
+			continue
+		}
+		if !chartutil.IsCompatibleRange(dep.Version, c.Metadata.Version) {
+			continue
+		}
+
+		out := *c
+		md := *c.Metadata
+		out.Metadata = &md
+
+		if dep.Alias != "" {
+			md.Name = dep.Alias
+		}
+		return &out
+	}
+	return nil
+}
+
+func NewChartW(c *chart.Chart) (*ChartW, error) {
+	var newChartFunc func(c *chart.Chart, p *ChartW) (*ChartW, error)
+	newChartFunc = func(c *chart.Chart, p *ChartW) (*ChartW, error) {
+		log.Debug().Msgf("Generating new chart for %s", c.Name())
+		cW := ChartW{}
+		cW.Chart = c
+		cW.ChartHash = GetChartHash(c)
+		if p != nil {
+			cW.ParentW = p
+		}
+
+		// Process dependencies, to add Aliased Dependencies as charts to c.Dependencies()
+		chartDependencies := []*chart.Chart{}
+		for _, req := range c.Metadata.Dependencies {
+			if chartDependency := getAliasDependency(c.Dependencies(), req); chartDependency != nil {
+				chartDependencies = append(chartDependencies, chartDependency)
+			}
+			if req.Alias != "" {
+				// Replace name with alias
+				req.Name = req.Alias
+			}
+		}
+		c.SetDependencies(chartDependencies...)
+		for _, d := range c.Dependencies() {
+			n, err := newChartFunc(d, &cW)
+			if err != nil {
+				return nil, err
+			}
+			cW.DepsW = append(cW.DepsW, n)
+		}
+		return &cW, nil
+	}
+	cW, err := newChartFunc(c, nil)
+	if err != nil {
+		return nil, err
+	}
+	cW.Log()
+	return cW, nil
 }

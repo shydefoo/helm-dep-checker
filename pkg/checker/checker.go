@@ -2,27 +2,28 @@ package checker
 
 import (
 	"fmt"
-	"io/ioutil"
-	"log"
-	"os"
-	"path/filepath"
-	"strings"
 
-	"github.com/google/go-cmp/cmp"
-	"golang.org/x/sync/errgroup"
+	"github.com/rs/zerolog/log"
+
+	"github.com/golang-collections/collections/queue"
 	"gopkg.in/yaml.v2"
 	"helm.sh/helm/v3/pkg/chart"
-	"helm.sh/helm/v3/pkg/chart/loader"
 	"helm.sh/helm/v3/pkg/chartutil"
 )
 
-type Checker struct {
-	ChartDir                    string
-	RootChartName, RootChartVer string
-	OverwriteChanges            bool
+type Report struct {
+	FullDeps []*ChartW
+
+	Changes []*Change
 }
 
-func (checker *Checker) CollectChanges(rMap map[string]*Report, g *Graph) (bool, string, error) {
+type Checker struct {
+	ChartDir string
+	// RootChartName, RootChartVer string
+	OverwriteChanges bool
+}
+
+func (checker *Checker) CollectChanges(rMap map[*ChartW]*Report, g *Graph) (bool, string, error) {
 	// Iterate through each chart
 	// Copy chart.Dependency struct into currChart.Metadata.Dependencies
 	// Set currChart values to true for new dependency
@@ -32,182 +33,150 @@ func (checker *Checker) CollectChanges(rMap map[string]*Report, g *Graph) (bool,
 	// should have deps [a,b,d], root's values.yaml a.d.enabled: False and b.d.enabled: False,
 	// d.enabled: True (assuming dependency condition is d.enabled)
 	changesToAdd := ""
-	changed := false
+	chartsModified := false
 	addedDeps := false
 	valuesFileChanged := false
-	for c, r := range rMap {
-		root := g.CMap[c]
-		depAncestorMap := make(map[string][]*chart.Dependency)
+	for root, report := range rMap {
 		modifiedValues := make(map[string]interface{})
 		newDepList := []*chart.Dependency{}
 		// Iterate through all dependencies
-		for _, depC := range r.FullDeps {
-			depAncestors, ok := r.LookUp[getChartHash(depC)]
-			if !ok {
-				continue
-			}
-			// create mapping of parent chart to metadata dependencies
-			for _, p := range depAncestors {
-				depAncestorMap[getChartHash(p)] = p.Metadata.Dependencies
-			}
-
-			var d chart.Dependency
-			selectedParent := depC.Parent()
-			// Search through list of dependencies to find dependency to add to Parent currChart
-			for _, i := range selectedParent.Metadata.Dependencies {
-				if getDepHashFromParent(depC, i) != getChartHash(depC) {
-					continue
-				}
-				d = *i
-				nameToUse := nameOrAlias(&d)
-				newDep := &chart.Dependency{
-					Name:       d.Name,
-					Version:    d.Version,
-					Repository: d.Repository,
-					Condition:  fmt.Sprintf("%s.%s", nameToUse, "enabled"),
-					Alias:      d.Alias,
-					Enabled:    true,
-				}
-				addDep := true
-				for _, rootDep := range root.Metadata.Dependencies {
-					if getDepHashFromParent(root, rootDep) == getDepHashFromParent(depC, i) {
-						addDep = false
-					}
-				}
-				if addDep {
-					log.Printf("Add dep %s-%s to chart %s\n", d.Name, d.Version, root.Name())
-					root.Metadata.Dependencies = append(root.Metadata.Dependencies, newDep)
-					newDepList = append(newDepList, newDep)
-					addedDeps = true
-				}
-				// Collect changes to instruct users to make changes to Values.yaml
-				found, _ := SetValues(root, true, d.Condition, modifiedValues)
-				if IsGenericInstaller(depC) {
-					helmChartV := depC.Parent().Values[nameToUse].(map[string]interface{})[HelmChartKey]
-					found, _ = SetValues(root, helmChartV, fmt.Sprintf("%s.%s", nameToUse, HelmChartKey), modifiedValues)
-				}
-				valuesFileChanged = valuesFileChanged || found
-			}
-			// Search for existing dependencies to disable grandchild dependencies
-			for _, rootChartDep := range root.Metadata.Dependencies {
-				pdeps, ok := depAncestorMap[getDepHashFromParent(root, rootChartDep)]
-				if !ok {
-					continue
-				}
-				pdepCond := ""
-				for _, pdep := range pdeps {
-					if getDepHashFromParent(depC, pdep) == getChartHash(depC) {
-						pdepCond = pdep.Condition
-						nameToUse := nameOrAlias(rootChartDep)
-						found, _ := SetValues(root, false, fmt.Sprintf("%s.%s", nameToUse, pdepCond), modifiedValues)
-						valuesFileChanged = valuesFileChanged || found
-					}
-				}
-			}
+		for _, change := range report.Changes {
+			var x, y bool
+			x, y, newDepList = change.EnableDep(root, modifiedValues, newDepList)
+			addedDeps = addedDeps || x
+			valuesFileChanged = valuesFileChanged || y
+			y = change.DisableGrandchildDep(root, modifiedValues)
+			valuesFileChanged = valuesFileChanged || y
 		}
+		chartsModified = valuesFileChanged || addedDeps
 
-		changed = valuesFileChanged || addedDeps
 		if addedDeps {
 			b, err := yaml.Marshal(newDepList)
 			if err != nil {
-				return changed, "", err
+				return chartsModified, "", err
 			}
 			changesToAdd += fmt.Sprintf("Dependencies to add to %s/Chart.yaml: \n%s\n", root.Name(), string(b))
 		}
 		if valuesFileChanged {
 			b, err := yaml.Marshal(modifiedValues)
 			if err != nil {
-				return changed, "", err
+				return chartsModified, "", err
 			}
 			changesToAdd += fmt.Sprintf("Modify to %s/values.yaml to contain: \n%s\n", root.Name(), string(b))
 		}
-		if changed && checker.OverwriteChanges {
-			_ = chartutil.SaveDir(root, checker.ChartDir)
+		if chartsModified && checker.OverwriteChanges {
+			_ = chartutil.SaveDir(root.Chart, checker.ChartDir)
 		}
 	}
-	return changed, changesToAdd, nil
+	return chartsModified, changesToAdd, nil
 }
 
-func GetCharts(chartDir string) ([]*chart.Chart, error) {
-	// chartDir := "./test-charts"
-	log.Println("Get charts")
-	charts := []*chart.Chart{}
-	files, err := ioutil.ReadDir(chartDir)
-	if err != nil {
-		log.Fatal(err)
-		return nil, err
+func WalkGraph(g *Graph) map[*ChartW]*Report {
+	log.Debug().Msg("walkgraph")
+	report := make(map[*ChartW]*Report)
+
+	var traverse func(c *ChartW) []*ChartW
+	traverse = func(c *ChartW) []*ChartW {
+		log.Debug().Msgf("traversing %s", c.Name())
+		currentChash := c.ChartHash
+
+		// Stores existing dependencies and new dependencies from grandchild charts
+		depList := []*ChartW{}
+		commonDep := []*ChartW{}
+		q := queue.New()
+		childToSourceM := make(map[string]map[string]*ChartW)
+
+		newDepsFound := false
+		// stores mapping between child chart and list of ancestor charts
+		existingDeps := g.GMap[currentChash]
+		for _, d := range existingDeps {
+			q.Enqueue(d)
+			log.Debug().Msgf("enqueue %s", d.ChartHash)
+		}
+		if len(existingDeps) == 0 {
+			log.Debug().Msgf("done traversing: %s, no children", c.Name())
+			return depList
+		}
+		depSet := make(map[string]*ChartW)
+		for q.Len() > 0 {
+			d := q.Dequeue().(*ChartW)
+			log.Debug().Msgf("dequeue %s", d.ChartHash)
+			if _, ok := depSet[d.ChartHash]; !ok {
+				depSet[d.ChartHash] = d
+			}
+			grandChildDeps := traverse(d)
+			for _, dGrand := range grandChildDeps {
+				if _, ok := childToSourceM[dGrand.ChartHash]; !ok {
+					childToSourceM[dGrand.ChartHash] = map[string]*ChartW{d.ChartHash: d}
+				} else {
+					// childToSourceM[dGrand.ChartHash] = append(childToSourceM[dGrand.ChartHash], d)
+					tmp := childToSourceM[dGrand.ChartHash]
+					if _, ok := tmp[d.ChartHash]; !ok {
+						tmp[d.ChartHash] = d
+					}
+					commonDep = append(commonDep, dGrand)
+					if _, ok := depSet[dGrand.ChartHash]; !ok {
+						depSet[dGrand.ChartHash] = dGrand
+						log.Debug().Msgf("New Deps found: %s for %s", dGrand.ChartHash, c.ChartHash)
+						newDepsFound = true
+						log.Debug().Msgf("enqueue %s", dGrand.ChartHash)
+						q.Enqueue(dGrand)
+					}
+				}
+			}
+		}
+		for k, v := range childToSourceM {
+			log.Printf("depMap Key=%s,parents:\n", k)
+			for _, t := range v {
+				t.Log()
+			}
+			log.Printf("End of depMap Key=%s\n", k)
+		}
+		changes := []*Change{}
+		// for depHash, depChartWSources := range depMap {
+		for _, depChart := range commonDep {
+			depHash := depChart.ChartHash
+			depChartWSources := childToSourceM[depHash]
+			change := Change{DepHash: depHash, To: c}
+			var depToAdd chart.Dependency
+			if depChart.ParentW == nil {
+				continue
+			}
+			for _, d := range depChart.ParentW.Metadata.Dependencies {
+				if d == nil {
+					continue
+				}
+				if GetDepHash(d) != depHash {
+					continue
+				}
+				depToAdd = *d
+				break
+			}
+			for _, source := range depChartWSources {
+				change.SourceCharts = append(change.SourceCharts, *source)
+			}
+			change.DepToAdd = depToAdd
+			change.Log()
+			changes = append(changes, &change)
+		}
+		for _, v := range depSet {
+			depList = append(depList, v)
+		}
+		// Update chart's dependencies in graph
+		g.GMap[currentChash] = depList
+		if newDepsFound {
+			report[c] = &Report{FullDeps: depList, Changes: changes}
+		}
+		log.Debug().Msgf("done traversing %s", c.Name())
+		return depList
 	}
-	var g errgroup.Group
-	for _, file := range files {
-		if file.IsDir() {
-			chartPath := filepath.Join(chartDir, file.Name())
-			log.Println("chartPath", chartPath)
-			// dir is a helm chart
-			g.Go(func() error {
-				m, err := setup(chartPath, os.Stdout)
-				if err != nil {
-					return err
-				}
-				// Download dependencies
-				if err := m.Build(); err != nil {
-					log.Fatal(err)
-					return err
-				}
-				c, err := loader.Load(chartPath)
-				if err != nil {
-					log.Fatal(err)
-					return err
-				}
-				charts = append(charts, c)
-				return nil
-			})
+
+	for k, v := range g.RMap {
+		if v {
+			log.Debug().Msgf("traversing %s", k)
+			_ = traverse(g.CMap[k])
 		}
 	}
-	if err := g.Wait(); err != nil {
-		log.Fatal(err)
-		return nil, err
-	}
-	return charts, nil
-}
-func parsePath(key string) []string { return strings.Split(key, ".") }
-func nameOrAlias(d *chart.Dependency) string {
-	if d.Alias != "" {
-		return d.Alias
-	}
-	return d.Name
-}
 
-func SetValues(chart *chart.Chart, v interface{}, p string, currMap map[string]interface{}) (bool, map[string]interface{}) {
-	values := chart.Values
-	// log.Printf("setting %s of %s to %v\n", p, chart.Name(), v)
-	paths := parsePath(p)
-	// construct how map should look like
-	var tmp map[string]interface{}
-	tmp = currMap
-	for i := 0; i < len(paths)-1; i++ {
-		currPath := paths[i]
-		if _, ok := tmp[currPath]; !ok {
-			// if field does not exist, create new field
-			tmp[currPath] = make(map[string]interface{})
-		}
-		tmp = tmp[currPath].(map[string]interface{})
-	}
-	tmp[paths[len(paths)-1]] = v
-
-	//Check values if field is set correctly
-	tmp = values
-	needsChange := true
-	for i := 0; i < len(paths)-1; i++ {
-		currPath := paths[i]
-		if _, ok := tmp[currPath]; !ok {
-			// if field no present, shortcircuit immediately
-			return needsChange, currMap
-		}
-		tmp = tmp[currPath].(map[string]interface{})
-	}
-	if val, ok := tmp[paths[len(paths)-1]]; ok && cmp.Equal(val, v) {
-		needsChange = false
-	}
-	return needsChange, currMap
-
+	return report
 }

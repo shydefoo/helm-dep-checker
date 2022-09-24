@@ -3,7 +3,9 @@ module caraml-dev/caraml-dep-checker
 go 1.18
 
 require (
+	github.com/golang-collections/collections v0.0.0-20130729185459-604e922904d3
 	github.com/google/go-cmp v0.5.6
+	github.com/rs/zerolog v1.28.0
 	golang.org/x/sync v0.0.0-20220601150217-0de741cfad7f
 	gopkg.in/yaml.v2 v2.4.0
 	helm.sh/helm/v3 v3.9.4
