@@ -13,6 +13,8 @@ var chartPath = flag.String("p", "", "Path the helm charts")
 
 func main() {
 	flag.Parse()
+	// to change the flags on the default logger
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	log.Println("chartPath", *chartPath)
 	mc := checker.Checker{ChartDir: *chartPath}
 	c, err := checker.GetCharts(mc.ChartDir)
