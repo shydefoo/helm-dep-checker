@@ -143,35 +143,30 @@ func GetJobInfo(c *chart.Chart) *JobValues {
 }
 
 func ConstructGraph(charts []*ChartW) (*Graph, error) {
-	for _, chart := range charts {
-		log.Printf("CHARTS %s, %+v", chart.GetHash(), chart.Mdd)
-	}
 	g := make(map[string][]*ChartW)
 	cM := make(map[string]*ChartW)
 	rM := make(map[string]bool)
 	var _makeGraph func(*ChartW)
 	_makeGraph = func(c *ChartW) {
-		chash := c.GetHash()
+		chash := c.ChartHash
 		if _, ok := cM[chash]; !ok {
 			cM[chash] = c
 		}
-		// if _, ok := g[chash]; !ok {
-		g[chash] = append(g[chash], c.Mdd...)
-		log.Printf("makegraph %s, add deps %+v", c.GetHash(), c.Mdd)
-		for _, d := range c.Mdd {
-			rM[d.GetHash()] = false
-			_makeGraph(d)
+		if _, ok := g[chash]; !ok {
+			g[chash] = c.DepsW
+			for _, d := range c.DepsW {
+				rM[d.ChartHash] = false
+				_makeGraph(d)
+			}
 		}
-		// }
 	}
 	for _, c := range charts {
 		// set all charts to be roots
-		rM[c.GetHash()] = true
+		rM[c.ChartHash] = true
 	}
 	for _, c := range charts {
 		// Only construct graph for root charts, dependency charts will get added in through MakeGraph
 		_makeGraph(c)
-		log.Printf("Construct graph %s, %+v", c.GetHash(), g)
 	}
 	graph := &Graph{
 		GMap: g, CMap: cM, RMap: rM,
@@ -192,8 +187,8 @@ func WalkGraph(g *Graph) map[string]*Report {
 
 	var traverse func(c *ChartW) []*ChartW
 	traverse = func(c *ChartW) []*ChartW {
-		log.Println("w:traversing", c.GetName(), c.GetHash())
-		currentChash := c.GetHash()
+		log.Println("traversing", c.Name())
+		currentChash := c.ChartHash
 
 		// Stores existing dependencies and new dependencies from grandchild charts
 		depList := []*ChartW{}
@@ -203,31 +198,30 @@ func WalkGraph(g *Graph) map[string]*Report {
 		newDepsFound := false
 		// stores mapping between child chart and list of ancestor charts
 		depMap := make(map[string][]*ChartW)
-		log.Printf("%+v", g.GMap)
 		existingDeps := g.GMap[currentChash]
 		for _, d := range existingDeps {
 			q.Enqueue(d)
 		}
 		if len(existingDeps) == 0 {
-			log.Println("done traversing", c.GetName(), "no children")
-			return existingDeps
+			log.Println("done traversing", c.Name(), "no children")
+			return depList
 		}
 		depSet := make(map[string]*ChartW)
 		for q.Len() > 0 {
 			d := q.Dequeue().(*ChartW)
-			if _, ok := depSet[d.GetHash()]; !ok {
-				depSet[d.GetHash()] = d
+			if _, ok := depSet[d.ChartHash]; !ok {
+				depSet[d.ChartHash] = d
 			}
 			grandChildDeps := traverse(d)
 			for _, dGrand := range grandChildDeps {
-				if _, ok := depMap[dGrand.GetHash()]; !ok {
-					depMap[dGrand.GetHash()] = []*ChartW{d}
+				if _, ok := depMap[dGrand.ChartHash]; !ok {
+					depMap[dGrand.ChartHash] = []*ChartW{d}
 				} else {
-					depMap[dGrand.GetHash()] = append(depMap[dGrand.GetHash()], d)
+					depMap[dGrand.ChartHash] = append(depMap[dGrand.ChartHash], d)
 					commonDep = append(commonDep, dGrand)
-					if _, ok := depSet[dGrand.GetHash()]; !ok {
-						depSet[dGrand.GetHash()] = dGrand
-						log.Printf("New Deps found: %s", dGrand.GetHash())
+					if _, ok := depSet[dGrand.ChartHash]; !ok {
+						depSet[dGrand.ChartHash] = dGrand
+						log.Printf("New Deps found: %s", dGrand.ChartHash)
 						newDepsFound = true
 						q.Enqueue(dGrand)
 					}
@@ -236,9 +230,9 @@ func WalkGraph(g *Graph) map[string]*Report {
 		}
 		// check if existing deps contains new dep, else add to dep Set
 		// for _, d := range commonDep {
-		// 	if _, ok := depSet[d.GetHash()]; !ok {
-		// 		depSet[d.GetHash()] = d
-		// 		log.Printf("New Deps found: %s", d.GetHash())
+		// 	if _, ok := depSet[d.ChartHash]; !ok {
+		// 		depSet[d.ChartHash] = d
+		// 		log.Printf("New Deps found: %s", d.ChartHash)
 		// 		newDepsFound = true
 		// 		newDeps = append(newDeps, d)
 		// 	}
@@ -251,16 +245,16 @@ func WalkGraph(g *Graph) map[string]*Report {
 		if newDepsFound {
 			report[currentChash] = &Report{FullDeps: depList, LookUp: depMap}
 		}
-		log.Println("done traversing", c.GetName(), "depList", depList, "LookUp", depMap)
+		log.Println("done traversing", c.Name())
 		return depList
 	}
 
 	for k, v := range g.RMap {
-		if v && k == "root-0.1.0" {
+		if v {
 			log.Println("traversing", k)
 			_ = traverse(g.CMap[k])
 		}
 	}
-	log.Printf("%+v\n", report)
+
 	return report
 }

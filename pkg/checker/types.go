@@ -29,30 +29,12 @@ const (
 
 type ChartW struct {
 	*chart.Chart
-	*chart.Dependency
 	ChartHash string
-	DepHash   string
 	CType     ChartType
 	Job       *JobValues
 	DepsW     []*ChartW
 	ParentW   *ChartW
 	MetaDeps  []*MetadataDepW
-	Mdd       []*ChartW
-}
-
-func (cW *ChartW) GetName() string {
-	if cW.Chart != nil {
-		return cW.Chart.Name()
-	} else {
-		return cW.Dependency.Name
-	}
-}
-
-func (cW *ChartW) GetHash() string {
-	if cW.Chart != nil && cW.ChartHash != "" {
-		return cW.ChartHash
-	}
-	return cW.DepHash
 }
 
 func (cW *ChartW) AddMetadataDepdency(d *MetadataDepW) {
@@ -83,11 +65,8 @@ func NewChartW(c *chart.Chart) (*ChartW, error) {
 			cW.ChartHash = getChartHash(c)
 		}
 		for _, d := range c.Metadata.Dependencies {
-			log.Println("adding deps", getDepHash(c, d), " to", c.Name())
-			cW.Mdd = append(cW.Mdd, &ChartW{
-				Dependency: d,
-				DepHash:    getDepHash(c, d),
-			})
+			m := NewMetaDep(c, d)
+			cW.MetaDeps = append(cW.MetaDeps, m)
 		}
 		if p != nil {
 			cW.ParentW = p

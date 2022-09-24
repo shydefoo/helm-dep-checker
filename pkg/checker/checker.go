@@ -37,27 +37,25 @@ func (checker *Checker) CollectChanges(rMap map[string]*Report, g *Graph) (bool,
 	valuesFileChanged := false
 	for c, r := range rMap {
 		root := g.CMap[c]
-		depAncestorMap := make(map[string][]*ChartW)
+		depAncestorMap := make(map[string][]*MetadataDepW)
 		modifiedValues := make(map[string]interface{})
 		newDepList := []*chart.Dependency{}
 		// Iterate through all dependencies
 		for _, depC := range r.FullDeps {
-			depAncestors, ok := r.LookUp[depC.GetHash()]
+			depAncestors, ok := r.LookUp[depC.ChartHash]
 			if !ok {
 				continue
 			}
 			// create mapping of parent chart to metadata dependencies
 			for _, p := range depAncestors {
-				depAncestorMap[depC.GetHash()] = p.Mdd
+				depAncestorMap[depC.ChartHash] = p.MetaDeps
 			}
 
 			var d chart.Dependency
-			selectedParent := depAncestors[0]
-			log.Println("selectedParent", selectedParent)
+			selectedParent := depC.ParentW
 			// Search through list of dependencies to find dependency to add to Parent currChart
-			for _, i := range selectedParent.Mdd {
-				log.Printf("%+v, depC.GetHash():%s", i, depC.ChartHash)
-				if i.GetHash() != depC.GetHash() {
+			for _, i := range selectedParent.MetaDeps {
+				if i.DepHash != depC.ChartHash {
 					continue
 				}
 				d = *i.Dependency
@@ -71,17 +69,17 @@ func (checker *Checker) CollectChanges(rMap map[string]*Report, g *Graph) (bool,
 					Enabled:    true,
 				}
 				addDep := true
-				newMetaD := MetadataDepW{newDep, i.GetHash()}
+				newMetaD := MetadataDepW{newDep, i.DepHash}
 
 				// check if root.Metadata.Dependencies already has dependency added
-				for _, rootDep := range root.Mdd {
-					if rootDep.GetHash() == i.GetHash() {
+				for _, rootDep := range root.MetaDeps {
+					if rootDep.DepHash == i.DepHash {
 						addDep = false
 						break
 					}
 				}
 				if addDep {
-					log.Printf("Add dep %s-%s to chart %s\n", d.Name, d.Version, root.GetName())
+					log.Printf("Add dep %s-%s to chart %s\n", d.Name, d.Version, root.Name())
 					// root.Metadata.Dependencies = append(root.Metadata.Dependencies, newDep)
 					root.AddMetadataDepdency(&newMetaD)
 					newDepList = append(newDepList, newDep)
@@ -96,13 +94,13 @@ func (checker *Checker) CollectChanges(rMap map[string]*Report, g *Graph) (bool,
 				valuesFileChanged = valuesFileChanged || found
 			}
 			// Search for existing dependencies to disable grandchild dependencies
-			for _, rootChartDep := range root.Mdd {
-				pdeps, ok := depAncestorMap[rootChartDep.GetHash()]
+			for _, rootChartDep := range root.MetaDeps {
+				pdeps, ok := depAncestorMap[rootChartDep.DepHash]
 				if !ok {
 					continue
 				}
 				for _, pdep := range pdeps {
-					if pdep.GetHash() == depC.GetHash() {
+					if pdep.DepHash == depC.ChartHash {
 						nameToUse := nameOrAlias(rootChartDep.Dependency)
 						found, _ := BuildValues(root, false, fmt.Sprintf("%s.%s", nameToUse, pdep.Condition), modifiedValues)
 						valuesFileChanged = valuesFileChanged || found
@@ -118,14 +116,14 @@ func (checker *Checker) CollectChanges(rMap map[string]*Report, g *Graph) (bool,
 			if err != nil {
 				return changed, "", err
 			}
-			changesToAdd += fmt.Sprintf("Dependencies to add to %s/Chart.yaml: \n%s\n", root.GetName(), string(b))
+			changesToAdd += fmt.Sprintf("Dependencies to add to %s/Chart.yaml: \n%s\n", root.Name(), string(b))
 		}
 		if valuesFileChanged {
 			b, err := yaml.Marshal(modifiedValues)
 			if err != nil {
 				return changed, "", err
 			}
-			changesToAdd += fmt.Sprintf("Modify to %s/values.yaml to contain: \n%s\n", root.GetName(), string(b))
+			changesToAdd += fmt.Sprintf("Modify to %s/values.yaml to contain: \n%s\n", root.Name(), string(b))
 		}
 		if changed && checker.OverwriteChanges {
 			_ = chartutil.SaveDir(root.Chart, checker.ChartDir)
