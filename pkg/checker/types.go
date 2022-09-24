@@ -7,13 +7,6 @@ import (
 	"helm.sh/helm/v3/pkg/chartutil"
 )
 
-type JobValues struct {
-	Repository string `json:"repository"`
-	Chart      string `json:"chart"`
-	Version    string `json:"version"`
-	Namespace  string `json:"namespace"`
-	Release    string `json:"release"`
-}
 type ChartType int
 
 const (
@@ -25,7 +18,6 @@ type ChartW struct {
 	*chart.Chart
 	ChartHash string
 	CType     ChartType
-	Job       *JobValues
 	DepsW     []*ChartW
 	ParentW   *ChartW
 }
