@@ -1,8 +1,7 @@
 package checker
 
 import (
-	"log"
-
+	"github.com/rs/zerolog/log"
 	"helm.sh/helm/v3/pkg/chart"
 )
 
@@ -63,6 +62,6 @@ func (g *Graph) PrintGraph() {
 		for _, cw := range v {
 			cNames = append(cNames, cw.ChartHash)
 		}
-		log.Printf("node: %s, edges: %s", k, cNames)
+		log.Debug().Msgf("node: %s, edges: %s", k, cNames)
 	}
 }

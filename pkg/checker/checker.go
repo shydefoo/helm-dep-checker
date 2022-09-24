@@ -2,7 +2,8 @@ package checker
 
 import (
 	"fmt"
-	"log"
+
+	"github.com/rs/zerolog/log"
 
 	"github.com/golang-collections/collections/queue"
 	"gopkg.in/yaml.v2"
@@ -71,12 +72,12 @@ func (checker *Checker) CollectChanges(rMap map[*ChartW]*Report, g *Graph) (bool
 }
 
 func WalkGraph(g *Graph) map[*ChartW]*Report {
-	log.Println("walkgraph")
+	log.Debug().Msg("walkgraph")
 	report := make(map[*ChartW]*Report)
 
 	var traverse func(c *ChartW) []*ChartW
 	traverse = func(c *ChartW) []*ChartW {
-		log.Println("traversing", c.Name())
+		log.Debug().Msgf("traversing %s", c.Name())
 		currentChash := c.ChartHash
 
 		// Stores existing dependencies and new dependencies from grandchild charts
@@ -90,16 +91,16 @@ func WalkGraph(g *Graph) map[*ChartW]*Report {
 		existingDeps := g.GMap[currentChash]
 		for _, d := range existingDeps {
 			q.Enqueue(d)
-			log.Println("enqueue", d.ChartHash)
+			log.Debug().Msgf("enqueue %s", d.ChartHash)
 		}
 		if len(existingDeps) == 0 {
-			log.Println("done traversing", c.Name(), "no children")
+			log.Debug().Msgf("done traversing: %s, no children", c.Name())
 			return depList
 		}
 		depSet := make(map[string]*ChartW)
 		for q.Len() > 0 {
 			d := q.Dequeue().(*ChartW)
-			log.Println("dequeue", d.ChartHash)
+			log.Debug().Msgf("dequeue %s", d.ChartHash)
 			if _, ok := depSet[d.ChartHash]; !ok {
 				depSet[d.ChartHash] = d
 			}
@@ -116,9 +117,9 @@ func WalkGraph(g *Graph) map[*ChartW]*Report {
 					commonDep = append(commonDep, dGrand)
 					if _, ok := depSet[dGrand.ChartHash]; !ok {
 						depSet[dGrand.ChartHash] = dGrand
-						log.Printf("New Deps found: %s for %s", dGrand.ChartHash, c.ChartHash)
+						log.Debug().Msgf("New Deps found: %s for %s", dGrand.ChartHash, c.ChartHash)
 						newDepsFound = true
-						log.Println("enqueue", dGrand.ChartHash)
+						log.Debug().Msgf("enqueue %s", dGrand.ChartHash)
 						q.Enqueue(dGrand)
 					}
 				}
@@ -166,13 +167,13 @@ func WalkGraph(g *Graph) map[*ChartW]*Report {
 		if newDepsFound {
 			report[c] = &Report{FullDeps: depList, Changes: changes}
 		}
-		log.Println("done traversing", c.Name())
+		log.Debug().Msgf("done traversing %s", c.Name())
 		return depList
 	}
 
 	for k, v := range g.RMap {
 		if v {
-			log.Println("traversing", k)
+			log.Debug().Msgf("traversing %s", k)
 			_ = traverse(g.CMap[k])
 		}
 	}

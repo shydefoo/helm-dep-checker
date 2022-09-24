@@ -2,7 +2,8 @@ package checker
 
 import (
 	"fmt"
-	"log"
+
+	"github.com/rs/zerolog/log"
 
 	"helm.sh/helm/v3/pkg/chart"
 )
@@ -16,7 +17,7 @@ type Change struct {
 }
 
 func (c *Change) Log() {
-	log.Println("DepToAdd:", c.DepToAdd.Name, "DepHash:", c.DepHash, "To:", c.To.ChartHash)
+	log.Debug().Msg(fmt.Sprintln("DepToAdd:", c.DepToAdd.Name, "DepHash:", c.DepHash, "To:", c.To.ChartHash))
 	cNames := []string{}
 	for _, cw := range c.SourceCharts {
 		cNames = append(cNames, cw.ChartHash)
@@ -34,7 +35,7 @@ func (c *Change) EnableDep(root *ChartW, modifiedValues map[string]interface{}, 
 		}
 	}
 	if addDep {
-		log.Printf("Add dep %s-%s to chart %s\n", c.DepToAdd.Name, c.DepToAdd.Version, root.Name())
+		log.Debug().Msgf("Add dep %s-%s to chart %s\n", c.DepToAdd.Name, c.DepToAdd.Version, root.Name())
 		nameToUse := nameOrAlias(&d)
 		newDep := &chart.Dependency{
 			Name:       d.Name,

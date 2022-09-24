@@ -1,7 +1,7 @@
 package checker
 
 import (
-	"log"
+	"github.com/rs/zerolog/log"
 
 	"helm.sh/helm/v3/pkg/chart"
 	"helm.sh/helm/v3/pkg/chartutil"
@@ -27,7 +27,7 @@ func (c *ChartW) Log() {
 	for _, cw := range c.DepsW {
 		cNames = append(cNames, cw.ChartHash)
 	}
-	log.Printf("chartHash=%s, Deps=%s", c.ChartHash, cNames)
+	log.Debug().Msgf("chartHash=%s, Deps=%s", c.ChartHash, cNames)
 }
 
 // func (cW *ChartW) AddMetadataDepdency(d *MetadataDepW) {
@@ -67,7 +67,7 @@ func getAliasDependency(charts []*chart.Chart, dep *chart.Dependency) *chart.Cha
 func NewChartW(c *chart.Chart) (*ChartW, error) {
 	var newChartFunc func(c *chart.Chart, p *ChartW) (*ChartW, error)
 	newChartFunc = func(c *chart.Chart, p *ChartW) (*ChartW, error) {
-		log.Println("Generating new chart for", c.Name())
+		log.Debug().Msgf("Generating new chart for %s", c.Name())
 		cW := ChartW{}
 		cW.Chart = c
 		cW.ChartHash = GetChartHash(c)
