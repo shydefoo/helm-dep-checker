@@ -34,6 +34,8 @@ func main() {
 		log.Println("Changes required:")
 		log.Fatal(changes)
 		os.Exit(1)
+	} else {
+		log.Println("SUCCESS, NO CHANGES REQUIRED")
 	}
 
 }

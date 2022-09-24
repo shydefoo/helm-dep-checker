@@ -71,8 +71,10 @@ func GetCharts(chartDir string) ([]*ChartW, error) {
 				}
 				// Download dependencies
 				if err := m.Build(); err != nil {
-					log.Fatal(err)
-					return err
+					if err := m.Update(); err != nil {
+						log.Fatal(err)
+						return err
+					}
 				}
 				c, err := loader.Load(chartPath)
 				if err != nil {

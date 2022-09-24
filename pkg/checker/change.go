@@ -49,6 +49,14 @@ func (c *Change) EnableDep(root *ChartW, modifiedValues map[string]interface{}, 
 	}
 	// Collect changes to instruct users to make changes to Values.yaml
 	valuesChanged, _ := BuildValues(root, true, d.Condition, modifiedValues)
+
+	// if dep to add is a installer job, add extra values helm values from any source
+	if d.Name == JobChartName {
+		source := c.SourceCharts[0]
+		nameToUse := nameOrAlias(&d)
+		valuesToAdd := source.Values[nameToUse].(map[string]interface{})[HelmChartKey]
+		valuesChanged, _ = BuildValues(root, valuesToAdd, fmt.Sprintf("%s.%s", nameToUse, HelmChartKey), modifiedValues)
+	}
 	return addDep, valuesChanged, newDepList
 }
 
