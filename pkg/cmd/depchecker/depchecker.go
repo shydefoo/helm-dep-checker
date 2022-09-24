@@ -49,7 +49,7 @@ func main() {
 		fmt.Println(changes)
 		os.Exit(1)
 	} else {
-		log.Print("SUCCESS, NO CHANGES REQUIRED")
+		log.Info().Msg("SUCCESS, NO CHANGES REQUIRED")
 	}
 
 }

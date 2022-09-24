@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -12,9 +13,10 @@ import (
 	"helm.sh/helm/v3/pkg/chartutil"
 )
 
-var srcChartPath = "/Users/shide.foo/repos/shide/caraml-dep-checker/test-charts/foo"
+var srcChartPath = flag.String("s", "./test-charts/foo", "source chart path")
+var dagPath = flag.String("d", "/tmp/helm_struct.json", "Path to helm chart graph definition")
 
-func GenerateChart(input map[string][]string, root string, destPath string) (string, error) {
+func GenerateChart(srcChartPath string, input map[string][]string, root string, destPath string) (string, error) {
 	var makeCharts func(string) (map[string]string, error)
 	log.Println("Generate chart")
 	path, err := os.MkdirTemp(destPath, "test_chart_*")
@@ -60,8 +62,9 @@ func GenerateChart(input map[string][]string, root string, destPath string) (str
 }
 
 func main() {
+	flag.Parse()
 	x := make(map[string][]string)
-	b, err := ioutil.ReadFile("/tmp/helm_struct.json")
+	b, err := ioutil.ReadFile(*dagPath)
 	if err != nil {
 		log.Fatal(err)
 		panic(err)
@@ -70,7 +73,7 @@ func main() {
 		log.Fatal(err)
 		panic(err)
 	}
-	_, err = GenerateChart(x, "root", "/tmp/test-charts")
+	_, err = GenerateChart(*srcChartPath, x, "root", "/tmp/test-charts")
 	if err != nil {
 		panic(err)
 	}
