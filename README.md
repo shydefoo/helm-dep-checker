@@ -45,3 +45,55 @@ go run pkg/cmd/chart-generator/chart-generator.go
 ```sh
 go run pkg/cmd/depchecker.go -p ./test-charts/my-charts
 ```
+
+* Sample output
+```sh
+Dependencies to add to a/Chart.yaml:
+- name: f
+  version: 0.1.0
+  repository: file:///Users/shide.foo/repos/shide/caraml-dep-checker/test-charts/my-charts/f
+  condition: f.enabled
+  tags: []
+  enabled: true
+  importvalues: []
+  alias: ""
+
+Modify to a/values.yaml to contain:
+c:
+  f:
+    enabled: false
+d:
+  f:
+    enabled: false
+f:
+  enabled: true
+
+Dependencies to add to root/Chart.yaml:
+- name: f
+  version: 0.1.0
+  repository: file:///Users/shide.foo/repos/shide/caraml-dep-checker/test-charts/my-charts/f
+  condition: f.enabled
+  tags: []
+  enabled: true
+  importvalues: []
+  alias: ""
+
+Modify to root/values.yaml to contain:
+a:
+  d:
+    enabled: false
+  f:
+    enabled: false
+b:
+  d:
+    enabled: false
+d:
+  enabled: true
+  f:
+    enabled: false
+f:
+  enabled: true
+
+
+exit status 1
+```
