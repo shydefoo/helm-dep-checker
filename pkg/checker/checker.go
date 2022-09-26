@@ -28,10 +28,6 @@ func (checker *Checker) CollectChanges(rMap map[*ChartW]*Report, g *Graph) (bool
 	// Copy chart.Dependency struct into currChart.Metadata.Dependencies
 	// Set currChart values to true for new dependency
 	// Disable existing dependencies' dependency
-	// "root new deps ['b', 'd', 'a'], parent_look_up={'f': ['a'], 'd': ['a', 'b'], 'c': ['a']}" indicates
-	// root Chart.yaml dependencies
-	// should have deps [a,b,d], root's values.yaml a.d.enabled: False and b.d.enabled: False,
-	// d.enabled: True (assuming dependency condition is d.enabled)
 	changesToAdd := ""
 	chartsModified := false
 	addedDeps := false
@@ -126,11 +122,11 @@ func WalkGraph(g *Graph) map[*ChartW]*Report {
 			}
 		}
 		for k, v := range childToSourceM {
-			log.Printf("depMap Key=%s,parents:\n", k)
+			log.Debug().Msgf("depMap Key=%s,parents:\n", k)
 			for _, t := range v {
 				t.Log()
 			}
-			log.Printf("End of depMap Key=%s\n", k)
+			log.Debug().Msgf("End of depMap Key=%s\n", k)
 		}
 		changes := []*Change{}
 		// for depHash, depChartWSources := range depMap {

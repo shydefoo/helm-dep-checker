@@ -7,6 +7,7 @@
 ```sh
 2022/09/24 19:40:54 main.go:38: SUCCESS, NO CHANGES REQUIRED
 ```
+* Charts and subcharts are compared using the Chart Name or Alias
 
 * Clone git repo
 * Generate sample umbrella charts using:
@@ -97,3 +98,5 @@ f:
 
 exit status 1
 ```
+
+* Modify the charts according to the output of the script
