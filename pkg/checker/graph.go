@@ -34,6 +34,7 @@ func ConstructGraph(charts []*ChartW) (*Graph, error) {
 			cM[chash] = c
 		}
 		if _, ok := g[chash]; !ok {
+			// TODO: filter for charts that are NOT library types
 			g[chash] = c.DepsW
 			for _, d := range c.DepsW {
 				rM[d.ChartHash] = false
