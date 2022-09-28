@@ -44,7 +44,7 @@ go run pkg/cmd/chart-generator/chart-generator.go
 * Run dep-checker on helm chart dir to see output
 
 ```sh
-go run pkg/cmd/depchecker.go -p ./test-charts/my-charts
+go run pkg/cmd/depchecker/depchecker.go -p ./test-charts/my-charts
 ```
 
 * Sample output

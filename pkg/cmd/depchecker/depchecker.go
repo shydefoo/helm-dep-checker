@@ -8,7 +8,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 
-	"caraml-dev/caraml-dep-checker/pkg/checker"
+	"github.com/shydefoo/helm-dep-checker/pkg/checker"
 )
 
 var chartPath = flag.String("p", "", "Path the helm charts")

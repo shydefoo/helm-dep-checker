@@ -1,4 +1,4 @@
-module caraml-dev/caraml-dep-checker
+module github.com/shydefoo/helm-dep-checker
 
 go 1.18
 
